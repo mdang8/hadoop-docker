@@ -11,8 +11,13 @@ USER root
 RUN yum clean all; \
     rpm --rebuilddb; \
     yum install -y curl which tar sudo openssh-server openssh-clients rsync
+
+# install JDK 8
+RUN yum install -y java-1.8.0-openjdk
+
 # update libselinux. see https://github.com/sequenceiq/hadoop-docker/issues/14
 RUN yum update -y libselinux
+RUN yum update -y nss
 
 # passwordless ssh
 RUN ssh-keygen -q -N "" -t dsa -f /etc/ssh/ssh_host_dsa_key
@@ -20,13 +25,20 @@ RUN ssh-keygen -q -N "" -t rsa -f /etc/ssh/ssh_host_rsa_key
 RUN ssh-keygen -q -N "" -t rsa -f /root/.ssh/id_rsa
 RUN cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
 
-
 # java
-RUN curl -LO 'http://download.oracle.com/otn-pub/java/jdk/7u71-b14/jdk-7u71-linux-x64.rpm' -H 'Cookie: oraclelicense=accept-securebackup-cookie'
-RUN rpm -i jdk-7u71-linux-x64.rpm
-RUN rm jdk-7u71-linux-x64.rpm
+#RUN curl -LO 'http://download.oracle.com/otn-pub/java/jdk/7u71-b14/jdk-7u71-linux-x64.rpm' -H 'Cookie: oraclelicense=accept-securebackup-cookie'
+#RUN rpm -i jdk-7u71-linux-x64.rpm
+#RUN rm jdk-7u71-linux-x64.rpm
+#RUN curl -LOb "oraclelicense=a" https://download.oracle.com/otn-pub/java/jdk/8u251-b11/a58eab1ec242421181065cdc37240b08/jdk-8u251-linux-x64.rpm
 
-ENV JAVA_HOME /usr/java/default
+#COPY jdk-8u251-linux-x64.rpm /tmp/
+#RUN rpm -i /tmp/jdk-8u251-linux-x64.rpm
+#RUN rm /tmp/jdk-8u251-linux-x64.rpm
+
+RUN echo $(update-alternatives --display java)
+
+#ENV JAVA_HOME /usr/java/default
+ENV JAVA_HOME /usr/lib/jvm/jre-1.8.0-openjdk.x86_64
 ENV PATH $PATH:$JAVA_HOME/bin
 RUN rm /usr/bin/java && ln -s $JAVA_HOME/bin/java /usr/bin/java
 
@@ -35,33 +47,44 @@ RUN mkdir -p /tmp/native
 RUN curl -L https://github.com/sequenceiq/docker-hadoop-build/releases/download/v2.7.1/hadoop-native-64-2.7.1.tgz | tar -xz -C /tmp/native
 
 # hadoop
-RUN curl -s http://www.eu.apache.org/dist/hadoop/common/hadoop-2.7.1/hadoop-2.7.1.tar.gz | tar -xz -C /usr/local/
-RUN cd /usr/local && ln -s ./hadoop-2.7.1 hadoop
+RUN curl -s http://archive.apache.org/dist/hadoop/common/hadoop-3.2.1/hadoop-3.2.1.tar.gz | tar -xz -C /usr/local/
+RUN cd /usr/local && ln -s ./hadoop-3.2.1 hadoop
 
-ENV HADOOP_PREFIX /usr/local/hadoop
+ENV HADOOP_HOME /usr/local/hadoop
 ENV HADOOP_COMMON_HOME /usr/local/hadoop
 ENV HADOOP_HDFS_HOME /usr/local/hadoop
 ENV HADOOP_MAPRED_HOME /usr/local/hadoop
 ENV HADOOP_YARN_HOME /usr/local/hadoop
 ENV HADOOP_CONF_DIR /usr/local/hadoop/etc/hadoop
-ENV YARN_CONF_DIR $HADOOP_PREFIX/etc/hadoop
+ENV YARN_CONF_DIR $HADOOP_HOME/etc/hadoop
 
-RUN sed -i '/^export JAVA_HOME/ s:.*:export JAVA_HOME=/usr/java/default\nexport HADOOP_PREFIX=/usr/local/hadoop\nexport HADOOP_HOME=/usr/local/hadoop\n:' $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
-RUN sed -i '/^export HADOOP_CONF_DIR/ s:.*:export HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop/:' $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
+ENV HDFS_NAMENODE_USER root
+ENV HDFS_DATANODE_USER root
+ENV HDFS_SECONDARYNAMENODE_USER root
+ENV YARN_RESOURCEMANAGER_USER root
+ENV YARN_NODEMANAGER_USER root
+
+#RUN sed -i '/^JAVA_HOME=/s:.*:JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk.x86_64\nexport HADOOP_HOME=/usr/local/hadoop\n:' $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+#RUN sed -i '/^HADOOP_CONF_DIR=/ s:.*:HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop/:' $HADOOP_HOME/etc/hadoop/hadoop-env.sh
 #RUN . $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
+#RUN cat $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+RUN echo "JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk.x86_64" >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+RUN echo "HADOOP_HOME=/usr/local/hadoop" >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+RUN echo "HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop/" >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+RUN cat $HADOOP_HOME/etc/hadoop/hadoop-env.sh
 
-RUN mkdir $HADOOP_PREFIX/input
-RUN cp $HADOOP_PREFIX/etc/hadoop/*.xml $HADOOP_PREFIX/input
+RUN mkdir $HADOOP_HOME/input
+RUN cp $HADOOP_HOME/etc/hadoop/*.xml $HADOOP_HOME/input
 
 # pseudo distributed
-ADD core-site.xml.template $HADOOP_PREFIX/etc/hadoop/core-site.xml.template
+ADD core-site.xml.template $HADOOP_HOME/etc/hadoop/core-site.xml.template
 RUN sed s/HOSTNAME/localhost/ /usr/local/hadoop/etc/hadoop/core-site.xml.template > /usr/local/hadoop/etc/hadoop/core-site.xml
-ADD hdfs-site.xml $HADOOP_PREFIX/etc/hadoop/hdfs-site.xml
+ADD hdfs-site.xml $HADOOP_HOME/etc/hadoop/hdfs-site.xml
 
-ADD mapred-site.xml $HADOOP_PREFIX/etc/hadoop/mapred-site.xml
-ADD yarn-site.xml $HADOOP_PREFIX/etc/hadoop/yarn-site.xml
+ADD mapred-site.xml $HADOOP_HOME/etc/hadoop/mapred-site.xml
+ADD yarn-site.xml $HADOOP_HOME/etc/hadoop/yarn-site.xml
 
-RUN $HADOOP_PREFIX/bin/hdfs namenode -format
+RUN $HADOOP_HOME/bin/hdfs namenode -format
 
 # fixing the libhadoop.so like a boss
 RUN rm -rf /usr/local/hadoop/lib/native
@@ -95,13 +118,13 @@ RUN sed  -i "/^[^#]*UsePAM/ s/.*/#&/"  /etc/ssh/sshd_config
 RUN echo "UsePAM no" >> /etc/ssh/sshd_config
 RUN echo "Port 2122" >> /etc/ssh/sshd_config
 
-RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -mkdir -p /user/root
-RUN service sshd start && $HADOOP_PREFIX/etc/hadoop/hadoop-env.sh && $HADOOP_PREFIX/sbin/start-dfs.sh && $HADOOP_PREFIX/bin/hdfs dfs -put $HADOOP_PREFIX/etc/hadoop/ input
+RUN service sshd start && $HADOOP_HOME/etc/hadoop/hadoop-env.sh && $HADOOP_HOME/sbin/start-dfs.sh && $HADOOP_HOME/bin/hdfs dfs -mkdir -p /user/root
+RUN service sshd start && $HADOOP_HOME/etc/hadoop/hadoop-env.sh && $HADOOP_HOME/sbin/start-dfs.sh && $HADOOP_HOME/bin/hdfs dfs -put $HADOOP_HOME/etc/hadoop/ input
 
 CMD ["/etc/bootstrap.sh", "-d"]
 
 # Hdfs ports
-EXPOSE 50010 50020 50070 50075 50090 8020 9000
+EXPOSE 50010 50020 50070 50075 50090 8020 9000 9870 9864
 # Mapred ports
 EXPOSE 10020 19888
 #Yarn ports
